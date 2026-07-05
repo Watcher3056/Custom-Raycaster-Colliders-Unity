@@ -1,0 +1,16 @@
+{
+    "name": "CustomRaycastSystem.Unity",
+    "rootNamespace": "",
+    "references": [
+        "CustomRaycastSystem.Core"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
