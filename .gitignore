@@ -97,3 +97,7 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# headless test project build output
+Tests.Core/[Bb]in/
+Tests.Core/[Oo]bj/

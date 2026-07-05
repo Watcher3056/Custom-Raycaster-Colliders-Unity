@@ -1,20 +1,32 @@
-﻿using System.Collections.Generic;
-using System.Linq;
+using System.Collections.Generic;
 
 #if UNITY_5_3_OR_NEWER
 using UVector3 = UnityEngine.Vector3;
 using UQuaternion = UnityEngine.Quaternion;
 using UMathf = UnityEngine.Mathf;
-#else
-    // Assuming CustomMath.cs and other core files are in the same namespace or accessible
 #endif
 
-// The core manager for the custom raycast system.
+// Single-threaded, like the original library (RaycastAll reuses a pooled instance buffer).
 public class CustomRaycastSystemCore
 {
     private Dictionary<int, IPrimitive> _allPrimitives = new Dictionary<int, IPrimitive>();
     private int _nextPrimitiveID = 0;
     private IAccelerationStructure _accelerationStructure;
+
+    // Pooled candidate buffer for RaycastAll; never handed to callers.
+    private readonly List<IPrimitive> _candidateBuffer = new List<IPrimitive>(64);
+
+    // Deterministic order (Distance, then PrimitiveID); static instance keeps Sort allocation-free.
+    private sealed class HitDistanceComparer : IComparer<CHitInfo>
+    {
+        public static readonly HitDistanceComparer Instance = new HitDistanceComparer();
+        public int Compare(CHitInfo a, CHitInfo b)
+        {
+            int byDistance = a.Distance.CompareTo(b.Distance);
+            if (byDistance != 0) return byDistance;
+            return a.PrimitiveID.CompareTo(b.PrimitiveID);
+        }
+    }
 
     public CustomRaycastSystemCore(bool useQuadTree, UVector3 quadTreeCenter, UVector3 quadTreeSize, int quadTreeCapacity)
     {
@@ -28,25 +40,15 @@ public class CustomRaycastSystemCore
         }
     }
 
+    // Constructor ids are placeholders: AddPrimitive assigns unique sequential ids (never rejects/throws).
+    private void AssignId(IPrimitive primitive)
+    {
+        primitive.ID = _nextPrimitiveID++;
+    }
+
     public IPrimitive AddPrimitive(IPrimitive primitive)
     {
-        // Ensure ID is assigned before adding to dictionary and acceleration structure
-        // This is handled by the `RegisterPrimitive` in the Unity layer, but good to ensure here too.
-        if (primitive.ID == -1) // If ID hasn't been assigned yet (e.g., from constructor)
-        {
-            // Note: IPrimitive.ID setter is private set. This would require a change
-            // to public set or a different ID assignment strategy.
-            // For now, assuming the Unity layer handles ID assignment correctly.
-            // A better pattern might be: `primitive.SetID(_nextPrimitiveID++);` if ID is read-only.
-            // Or, pass ID into the primitive constructor.
-            // For this implementation, the ID is set in the AddPrimitive method of the core.
-        }
-
-        // Assign ID here as per original logic, assuming primitive ID is mutable
-        primitive.ID = _nextPrimitiveID++; // Using dynamic to bypass private set for demonstration
-                                                        // In a real scenario, IPrimitive would have a public ID setter
-                                                        // or ID would be passed in constructor.
-
+        AssignId(primitive);
         _allPrimitives[primitive.ID] = primitive;
         _accelerationStructure.AddPrimitive(primitive);
         return primitive;
@@ -69,59 +71,30 @@ public class CustomRaycastSystemCore
             primitive.Rotation = newRotation;
             primitive.Size = newSize;
 
-            if (primitive is BoxPrimitive box)
-            {
-                box.UpdateTransformMatrix();
-            }
-            primitive.CalculateAABB(out UVector3 min, out UVector3 max);
+            // Refresh cached matrices (no concrete-type branching).
+            (primitive as ITransformedPrimitive)?.UpdateTransformMatrix();
+
+            // The structure re-stores the AABB itself AFTER removing under the old bounds.
             _accelerationStructure.UpdatePrimitive(primitive);
         }
     }
 
     public bool Raycast(CRay ray, out CHitInfo hitInfo, float maxDistance = UMathf.Infinity)
     {
-        hitInfo = new CHitInfo();
-        List<CHitInfo> allHits = new List<CHitInfo>();
-
-        List<IPrimitive> potentialPrimitives = _accelerationStructure.QueryRay(ray, maxDistance);
-
-        foreach (var primitive in potentialPrimitives)
-        {
-            if (primitive.IntersectRay(ray, out CHitInfo currentHitInfo, maxDistance))
-            {
-                allHits.Add(currentHitInfo);
-            }
-        }
-
-        CHitInfo closestHit = new CHitInfo { Distance = UMathf.Infinity };
-        bool hitFound = false;
-
-        foreach (var hit in allHits)
-        {
-            if (hit.Distance < closestHit.Distance)
-            {
-                closestHit = hit;
-                hitFound = true;
-            }
-        }
-
-        if (hitFound)
-        {
-            hitInfo = closestHit;
-            return true;
-        }
-        return false;
+        // Allocation-free; result identical to the historical gather-all-then-min loop.
+        return _accelerationStructure.RaycastClosest(ray, maxDistance, out hitInfo);
     }
 
     public List<CHitInfo> RaycastAll(CRay ray, float maxDistance = UMathf.Infinity, bool sortByDistance = true)
     {
+        // Exactly one allocation: the returned list. Candidates reuse the pooled buffer; sort is in-place.
         List<CHitInfo> allHits = new List<CHitInfo>();
 
-        List<IPrimitive> potentialPrimitives = _accelerationStructure.QueryRay(ray, maxDistance);
-
-        foreach (var primitive in potentialPrimitives)
+        _candidateBuffer.Clear();
+        _accelerationStructure.QueryRay(ray, maxDistance, _candidateBuffer);
+        for (int i = 0; i < _candidateBuffer.Count; i++)
         {
-            if (primitive.IntersectRay(ray, out CHitInfo currentHitInfo, maxDistance))
+            if (_candidateBuffer[i].IntersectRay(ray, out CHitInfo currentHitInfo, maxDistance))
             {
                 allHits.Add(currentHitInfo);
             }
@@ -129,7 +102,7 @@ public class CustomRaycastSystemCore
 
         if (sortByDistance)
         {
-            return allHits.OrderBy(h => h.Distance).ToList();
+            allHits.Sort(HitDistanceComparer.Instance);
         }
         return allHits;
     }

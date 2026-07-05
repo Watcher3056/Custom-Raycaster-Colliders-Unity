@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 
 #if UNITY_5_3_OR_NEWER
 using UVector3 = UnityEngine.Vector3;
@@ -69,10 +67,11 @@ using UDebug = UnityEngine.Debug;
 
         public static UVector3 operator +(UVector3 a, UVector3 b) => new UVector3(a.x + b.x, a.y + b.y, a.z + b.z);
         public static UVector3 operator -(UVector3 a, UVector3 b) => new UVector3(a.x - b.x, a.y - b.y, a.z - b.z);
+        public static UVector3 operator -(UVector3 a) => new UVector3(-a.x, -a.y, -a.z);
         public static UVector3 operator *(UVector3 a, float d) => new UVector3(a.x * d, a.y * d, a.z * d);
         public static UVector3 operator *(float d, UVector3 a) => new UVector3(a.x * d, a.y * d, a.z * d);
         public static UVector3 operator /(UVector3 a, float d) => new UVector3(a.x / d, a.y / d, a.z / d);
-        public static UVector3 operator *(UVector3 a, UVector3 b) => new UVector3(a.x * b.x, a.y * b.y, a.z * b.z); // Element-wise multiplication
+        // No element-wise operator* on purpose: UnityEngine.Vector3 has none (use Vector3.Scale).
     }
 
     public struct UQuaternion
@@ -114,18 +113,16 @@ using UDebug = UnityEngine.Debug;
             return res;
         }
 
-        public UQuaternion inverse
+        // Unity-parity: UnityEngine.Quaternion has only the static Inverse (no instance .inverse).
+        public static UQuaternion Inverse(UQuaternion rotation)
         {
-            get
+            float num = rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w;
+            if (num == 0f)
             {
-                float num = x * x + y * y + z * z + w * w;
-                if (num == 0f)
-                {
-                    return identity;
-                }
-                float num2 = 1f / num;
-                return new UQuaternion(-x * num2, -y * num2, -z * num2, w * num2);
+                return identity;
             }
+            float num2 = 1f / num;
+            return new UQuaternion(-rotation.x * num2, -rotation.y * num2, -rotation.z * num2, rotation.w * num2);
         }
     }
 
@@ -183,24 +180,79 @@ using UDebug = UnityEngine.Debug;
         {
             get
             {
-                // This inverse assumes a TRS matrix (no shear or perspective).
-                // It's optimized for inverse of rotation and translation.
-                UMatrix4x4 inv = identity;
+                // Full cofactor inverse: correct for any TRS, including non-uniform scale.
+                float a00 = m00, a01 = m01, a02 = m02, a03 = m03;
+                float a10 = m10, a11 = m11, a12 = m12, a13 = m13;
+                float a20 = m20, a21 = m21, a22 = m22, a23 = m23;
+                float a30 = m30, a31 = m31, a32 = m32, a33 = m33;
 
-                // Extract translation
-                UVector3 translation = new UVector3(m03, m13, m23);
+                float b00 = a00 * a11 - a01 * a10;
+                float b01 = a00 * a12 - a02 * a10;
+                float b02 = a00 * a13 - a03 * a10;
+                float b03 = a01 * a12 - a02 * a11;
+                float b04 = a01 * a13 - a03 * a11;
+                float b05 = a02 * a13 - a03 * a12;
+                float b06 = a20 * a31 - a21 * a30;
+                float b07 = a20 * a32 - a22 * a30;
+                float b08 = a20 * a33 - a23 * a30;
+                float b09 = a21 * a32 - a22 * a31;
+                float b10 = a21 * a33 - a23 * a31;
+                float b11 = a22 * a33 - a23 * a32;
 
-                // Inverse rotation (transpose of the 3x3 rotation part)
-                inv.m00 = m00; inv.m01 = m10; inv.m02 = m20;
-                inv.m10 = m01; inv.m11 = m11; inv.m12 = m21;
-                inv.m20 = m02; inv.m21 = m12; inv.m22 = m22;
+                float det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+                if (det == 0f) return identity;
+                float invDet = 1f / det;
 
-                // Inverse translation transformed by inverse rotation
-                inv.m03 = -(inv.m00 * translation.x + inv.m01 * translation.y + inv.m02 * translation.z);
-                inv.m13 = -(inv.m10 * translation.x + inv.m11 * translation.y + inv.m12 * translation.z);
-                inv.m23 = -(inv.m20 * translation.x + inv.m21 * translation.y + inv.m22 * translation.z);
-
+                UMatrix4x4 inv = new UMatrix4x4();
+                inv.m00 = (a11 * b11 - a12 * b10 + a13 * b09) * invDet;
+                inv.m01 = (-a01 * b11 + a02 * b10 - a03 * b09) * invDet;
+                inv.m02 = (a31 * b05 - a32 * b04 + a33 * b03) * invDet;
+                inv.m03 = (-a21 * b05 + a22 * b04 - a23 * b03) * invDet;
+                inv.m10 = (-a10 * b11 + a12 * b08 - a13 * b07) * invDet;
+                inv.m11 = (a00 * b11 - a02 * b08 + a03 * b07) * invDet;
+                inv.m12 = (-a30 * b05 + a32 * b02 - a33 * b01) * invDet;
+                inv.m13 = (a20 * b05 - a22 * b02 + a23 * b01) * invDet;
+                inv.m20 = (a10 * b10 - a11 * b08 + a13 * b06) * invDet;
+                inv.m21 = (-a00 * b10 + a01 * b08 - a03 * b06) * invDet;
+                inv.m22 = (a30 * b04 - a31 * b02 + a33 * b00) * invDet;
+                inv.m23 = (-a20 * b04 + a21 * b02 - a23 * b00) * invDet;
+                inv.m30 = (-a10 * b09 + a11 * b07 - a12 * b06) * invDet;
+                inv.m31 = (a00 * b09 - a01 * b07 + a02 * b06) * invDet;
+                inv.m32 = (-a30 * b03 + a31 * b01 - a32 * b00) * invDet;
+                inv.m33 = (a20 * b03 - a21 * b01 + a22 * b00) * invDet;
                 return inv;
+            }
+        }
+
+        // Headless equivalents of the UnityEngine.Matrix4x4 members the Core relies on.
+        public UVector3 MultiplyPoint3x4(UVector3 point)
+        {
+            UVector3 res;
+            res.x = m00 * point.x + m01 * point.y + m02 * point.z + m03;
+            res.y = m10 * point.x + m11 * point.y + m12 * point.z + m13;
+            res.z = m20 * point.x + m21 * point.y + m22 * point.z + m23;
+            return res;
+        }
+
+        public UVector3 MultiplyVector(UVector3 vector)
+        {
+            UVector3 res;
+            res.x = m00 * vector.x + m01 * vector.y + m02 * vector.z;
+            res.y = m10 * vector.x + m11 * vector.y + m12 * vector.z;
+            res.z = m20 * vector.x + m21 * vector.y + m22 * vector.z;
+            return res;
+        }
+
+        public UMatrix4x4 transpose
+        {
+            get
+            {
+                UMatrix4x4 t = identity;
+                t.m00 = m00; t.m01 = m10; t.m02 = m20; t.m03 = m30;
+                t.m10 = m01; t.m11 = m11; t.m12 = m21; t.m13 = m31;
+                t.m20 = m02; t.m21 = m12; t.m22 = m22; t.m23 = m32;
+                t.m30 = m03; t.m31 = m13; t.m32 = m23; t.m33 = m33;
+                return t;
             }
         }
 
@@ -272,4 +324,3 @@ using UDebug = UnityEngine.Debug;
         }
     }
 #endif
-    

@@ -1,13 +1,9 @@
-﻿#if UNITY_5_3_OR_NEWER
-using UnityEditor.PackageManager;
+#if UNITY_5_3_OR_NEWER
 using UMathf = UnityEngine.Mathf;
 using UQuaternion = UnityEngine.Quaternion;
 using UVector3 = UnityEngine.Vector3;
-#else
-    // Assuming CustomMath.cs is in the same namespace or accessible
 #endif
 
-// Implementation of a Sphere primitive.
 public class SpherePrimitive : IPrimitive
 {
     public int ID { get; set; }
@@ -28,20 +24,23 @@ public class SpherePrimitive : IPrimitive
         ID = id;
         Position = position;
         Radius = radius;
-        Rotation = UQuaternion.identity; // Spheres don't rotate
+        Rotation = UQuaternion.identity;
         CalculateAABB(out UVector3 min, out UVector3 max);
-        AABBMin = min;
-        AABBMax = max;
     }
 
+    // BUG FIX: stores the recomputed bounds -- stale AABBs made moved primitives un-hittable
+    // at their new location (pinned by StaleAabbRegressionTests).
     public void CalculateAABB(out UVector3 min, out UVector3 max)
     {
         min = Position - new UVector3(Radius, Radius, Radius);
         max = Position + new UVector3(Radius, Radius, Radius);
+        AABBMin = min;
+        AABBMax = max;
     }
 
     public bool IntersectRay(CRay ray, out CHitInfo hitInfo, float maxDistance)
     {
+        RaycastDiagnostics.CountIntersection();
         hitInfo = new CHitInfo();
         UVector3 L = Position - ray.Origin;
         float tca = UVector3.Dot(L, ray.Direction);
@@ -54,14 +53,14 @@ public class SpherePrimitive : IPrimitive
         float d2 = UVector3.Dot(L, L) - tca * tca;
         float radius2 = Radius * Radius;
 
-        if (d2 > radius2) return false; // Ray misses sphere
+        if (d2 > radius2) return false;
 
         float thc = UMathf.Sqrt(radius2 - d2);
-        float t = tca - thc; // First intersection point
+        float t = tca - thc;
 
-        if (t > maxDistance || t < UMathf.Epsilon) // Check if hit is beyond maxDistance or too close (ignore inside hits)
+        if (t > maxDistance || t < UMathf.Epsilon) // beyond maxDistance or too close (ignore inside hits)
         {
-            t = tca + thc; // Second intersection point
+            t = tca + thc;
             if (t > maxDistance || t < UMathf.Epsilon) return false;
         }
 
@@ -69,7 +68,7 @@ public class SpherePrimitive : IPrimitive
         hitInfo.PrimitiveReference = this;
         hitInfo.Distance = t;
         hitInfo.HitPoint = ray.GetPoint(t);
-        hitInfo.Normal = (hitInfo.HitPoint - Position).normalized; // Normal points from center to hit point
+        hitInfo.Normal = (hitInfo.HitPoint - Position).normalized;
 
         return true;
     }

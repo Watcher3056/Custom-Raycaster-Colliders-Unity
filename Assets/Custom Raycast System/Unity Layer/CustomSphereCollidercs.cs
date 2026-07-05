@@ -45,7 +45,6 @@ public class CustomSphereCollider : MonoBehaviour
     {
         if (_primitive != null)
         {
-            // Pass current transform position, rotation, and scale to the core system
             CustomRaycastSystem.Instance.UpdatePrimitive(_primitive.ID, transform.position, transform.rotation, _radius * transform.lossyScale);
         }
     }
@@ -55,10 +54,9 @@ public class CustomSphereCollider : MonoBehaviour
         if (_primitive != null)
         {
             Gizmos.color = Color.green;
-            // Apply the object's full transform (position, rotation, scale) to the Gizmos matrix
             Gizmos.matrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.localScale);
-            Gizmos.DrawWireSphere(Vector3.zero, _radius); // Draw a unit sphere at local origin
-            Gizmos.matrix = Matrix4x4.identity; // Reset Gizmos matrix
+            Gizmos.DrawWireSphere(Vector3.zero, _radius);
+            Gizmos.matrix = Matrix4x4.identity;
         }
     }
 }

@@ -37,7 +37,7 @@ public class AutoTest : MonoBehaviour
     [SerializeField] private Color _colorHitBoth = Color.green;
     [SerializeField] private Color _colorHitCustomOnly = Color.yellow;
     [SerializeField] private Color _colorHitUnityOnly = Color.blue;
-    [SerializeField] private Color _colorNoHit = Color.gray; // Color for objects not hit by either, or not part of mismatch
+    [SerializeField] private Color _colorNoHit = Color.gray;
 
     private List<GameObject> _testObjects = new List<GameObject>();
     private List<Rigidbody> _testObjectRigidbodies = new List<Rigidbody>();
@@ -50,7 +50,7 @@ public class AutoTest : MonoBehaviour
     private int _frameCounter = 0;
     private int _mismatchCount = 0;
 
-    private GameObject _testObjectsParent; // To hold all generated objects
+    private GameObject _testObjectsParent;
 
     private void Awake()
     {
@@ -73,7 +73,6 @@ public class AutoTest : MonoBehaviour
 
     private void GenerateTestObjects()
     {
-        // Clean up previous test run's objects if they exist
         if (_testObjectsParent != null)
         {
             Destroy(_testObjectsParent);
@@ -188,7 +187,7 @@ public class AutoTest : MonoBehaviour
         for (int i = 0; i < _testObjects.Count; i++)
         {
             GameObject obj = _testObjects[i];
-            if (obj == null) continue; // Skip if object was destroyed (e.g., manually)
+            if (obj == null) continue;
 
             Vector3 currentPos = obj.transform.position;
             Vector3 newPos = currentPos + _objectMoveDirections[i] * _objectMoveSpeed * Time.fixedDeltaTime;
@@ -256,7 +255,6 @@ public class AutoTest : MonoBehaviour
         }
         _unitySystemStopwatch.Stop();
 
-        // Consolidate all hits for coloring logic
         HashSet<GameObject> allCustomHitGameObjects = new HashSet<GameObject>();
         foreach (var hit in customHitsSingle) allCustomHitGameObjects.Add(hit.HitGameObject);
         foreach (var hit in customHitsAll) allCustomHitGameObjects.Add(hit.HitGameObject);
@@ -366,7 +364,6 @@ public class AutoTest : MonoBehaviour
         _mismatchCount++;
         UnityEngine.Debug.LogError($"Raycast Mismatch Detected (Frame {_frameCounter}, Mismatch Count: {_mismatchCount}): {message}");
 
-        // Apply color highlighting to objects
         foreach (var obj in _testObjects)
         {
             if (obj == null) continue;

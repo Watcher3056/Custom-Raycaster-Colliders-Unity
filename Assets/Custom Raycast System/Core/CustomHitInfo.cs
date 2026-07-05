@@ -1,7 +1,6 @@
 ﻿#if UNITY_5_3_OR_NEWER
 using UnityEngine;
 
-// CustomHitInfo for Unity, wrapping CHitInfo and adding GameObject reference
 public struct CustomHitInfo
 {
     public CHitInfo CoreHitInfo;

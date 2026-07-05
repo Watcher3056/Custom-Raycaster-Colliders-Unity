@@ -1,16 +1,17 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
-#if UNITY_5_3_OR_NEWER
-// No specific Unity types needed here
-#else
-    // Assuming CustomMath.cs and CRay.cs are in the same namespace or accessible
-#endif
-
-// Interface for spatial partitioning structures.
 public interface IAccelerationStructure
 {
     void AddPrimitive(IPrimitive primitive);
     void RemovePrimitive(IPrimitive primitive);
-    void UpdatePrimitive(IPrimitive primitive); // Called when primitive's properties change
+    void UpdatePrimitive(IPrimitive primitive);
+
+    // Allocating form: returns a superset of candidates within maxDistance.
     List<IPrimitive> QueryRay(CRay ray, float maxDistance);
+
+    // Allocation-free form: appends the same superset into a caller-owned buffer (caller clears).
+    void QueryRay(CRay ray, float maxDistance, List<IPrimitive> results);
+
+    // Closest-hit inside the structure (best-t pruning); must equal gather-then-min. Allocation-free.
+    bool RaycastClosest(CRay ray, float maxDistance, out CHitInfo hitInfo);
 }

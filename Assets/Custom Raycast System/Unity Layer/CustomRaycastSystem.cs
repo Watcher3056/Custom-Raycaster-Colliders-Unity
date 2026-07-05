@@ -7,7 +7,6 @@ using UDebug = UnityEngine.Debug;
 using System.Collections.Generic;
 using UnityEngine;
 
-// Unity MonoBehaviour Singleton
 public class CustomRaycastSystem : MonoBehaviour
 {
     private static CustomRaycastSystem _instance;

@@ -4,25 +4,51 @@ A cross-platform raycast system for Unity with custom primitive support and spat
 
 ![Demo](https://i.imgur.com/E1I2Rm7.gif)
 
+## Performance
+
+Measured with the included headless harness (.NET 8, Release, 20,000 rays per batch, seeded
+random scenes, QuadTree enabled). Absolute numbers vary with hardware:
+
+| Scene | Throughput | Narrow-phase tests / ray | GC allocation / raycast |
+|---|---:|---:|---:|
+| 100 boxes | ~1,190,000 rays/s | < 0.01 | 0 B |
+| 2,000 boxes | ~209,000 rays/s | 0.09 | 0 B |
+| 2,000 mixed spheres + boxes | ~144,000 rays/s | 0.46 | 0 B |
+| 10,000 boxes | ~58,000 rays/s | 0.36 | 0 B |
+
+Engine design behind the numbers:
+
+- Quadtree with cached per-subtree bounds and near-to-far, early-out traversal — closest-hit
+  queries skip whole subtrees that cannot beat the current best hit.
+- Zero-allocation query path: `Raycast` produces no garbage at steady state.
+- Deterministic `RaycastAll` ordering (distance, then primitive id).
+
+## Testing
+
+`Tests.Core/` is a headless xUnit suite — run `dotnet test Tests.Core`. It covers a
+QuadTree==SimpleList differential (including move/remove mutation scripts), geometric
+invariants, capsule geometry, the id contract, and zero-allocation assertions.
+
 ## Features
 
 - 🌐 **Cross-Platform** - Pure C# core works in Unity and standalone environments
-- 🎯 **Custom Primitives** - Box and Sphere collision detection
+- 🎯 **Custom Primitives** - Box, Sphere and Capsule collision detection
 - 📊 **Dual Acceleration** - QuadTree and SimpleList spatial structures  
+- ♻️ **Zero-GC raycasts** - closest-hit queries allocate nothing at steady state
 - 🔧 **Modular Design** - Separated Core logic and Unity integration layer
 - 🧪 **Performance Testing** - Built-in comparison tools with Unity Physics
 - ⚡ **Configurable** - Optimizable for different scene sizes
 
-## Performance Characteristics
+## Why not Unity Physics?
 
-**⚠️ Important Performance Note:**
-This system is **10-20x slower** than Unity's built-in Physics system. However, unlike Unity Physics, this module can be used in pure C# environments such as:
+Unlike Unity Physics, this module runs in pure C# environments:
 - Dedicated game servers
 - Headless simulations
 - Non-Unity applications
 - Cross-platform game logic
 
-For small scenes or when you have few colliders (< 20-30), **disable QuadTree acceleration** for better performance.
+For very small scenes (< 20-30 colliders), disable QuadTree acceleration — a plain list scan
+is cheaper than tree traversal.
 
 ## Architecture
 
@@ -30,7 +56,7 @@ The system is built with two distinct layers:
 
 ### Core Layer (Pure C#)
 - `CustomRaycastSystemCore` - Main raycast engine
-- `BoxPrimitive` & `SpherePrimitive` - Collision primitives
+- `BoxPrimitive`, `SpherePrimitive` & `CapsulePrimitive` - Collision primitives
 - `QuadTree` & `SimpleListAccelerationStructure` - Spatial optimization
 - Platform-agnostic math utilities
 
@@ -53,6 +79,12 @@ The system is built with two distinct layers:
 - **Features**: Uniform scaling only, rotation ignored
 - **Usage**: Ideal for projectiles, characters, circular areas
 
+### Capsule Primitive
+- **Shape**: Oriented capsule (cylinder with hemispherical caps, local +Y axis)
+- **Properties**: Position, Rotation, Size = (radius, totalHeight, radius)
+- **Features**: Full transform support; totalHeight is clamped to ≥ 2×radius
+- **Usage**: Characters, pills, rounded obstacles
+
 ## Quick Setup
 
 1. **Import the System**
@@ -61,6 +93,7 @@ The system is built with two distinct layers:
    ├── Core/                    # Platform-agnostic raycast engine
    ├── Unity Layer/             # Unity-specific components
    └── Tests/                   # Demo and testing scripts
+   Tests.Core/                  # Headless xUnit test suite (dotnet test Tests.Core)
    ```
 
 2. **Add the Singleton**
@@ -75,6 +108,11 @@ The system is built with two distinct layers:
    
    // Instead of BoxCollider  
    gameObject.AddComponent<CustomBoxCollider>();
+   ```
+   Capsules are Core-level primitives (no Unity component yet) — register manually:
+   ```csharp
+   CustomRaycastSystem.Instance.RegisterPrimitive(
+       new CapsulePrimitive(0, position, rotation, new Vector3(radius, height, radius)), gameObject);
    ```
 
 ## Basic Usage
@@ -149,8 +187,11 @@ Use **AutoTest** for performance and accuracy comparison:
 ### CustomRaycastSystem (Unity Layer)
 - `Raycast(Ray ray, out CustomHitInfo hitInfo, float maxDistance)` - Single raycast
 - `RaycastAll(Ray ray, float maxDistance, bool sortByDistance)` - Multiple raycasts
-- `RegisterPrimitive(IPrimitive primitive, GameObject gameObject)` - Manual registration
+- `RegisterPrimitive(IPrimitive primitive, GameObject gameObject)` - Manual registration (returns the primitive with its assigned ID)
 - `UnregisterPrimitive(int primitiveId)` - Manual removal
+- `UpdatePrimitive(int primitiveId, Vector3 position, Quaternion rotation, Vector3 size)` - Move / re-orient / resize a registered primitive
+
+IDs are system-owned: constructor ids are placeholders, `AddPrimitive`/`RegisterPrimitive` assign unique sequential ids.
 
 ### CustomHitInfo
 - `GameObject HitGameObject` - The hit GameObject (Unity only)
@@ -164,26 +205,25 @@ Use **AutoTest** for performance and accuracy comparison:
 The core system works independently of Unity for server-side logic:
 
 ```csharp
-// Create core system
-var coreSystem = new CustomRaycastSystemCore(
-    useQuadTree: false,  // Disable for small scenes
-    center: UVector3.zero, 
-    size: new UVector3(1000, 1000, 1000), 
-    capacity: 4
-);
+// Create the core system (useQuadTree, worldCenter, worldSize, nodeCapacity)
+var coreSystem = new CustomRaycastSystemCore(false, UVector3.zero,
+    new UVector3(1000, 1000, 1000), 4);
 
-// Add primitives
-var box = new BoxPrimitive(0, position, rotation, size);
-var sphere = new SpherePrimitive(1, position, radius);
-coreSystem.AddPrimitive(box);
-coreSystem.AddPrimitive(sphere);
+// Constructor ids are placeholders — AddPrimitive assigns and returns unique ids
+var box     = coreSystem.AddPrimitive(new BoxPrimitive(0, position, rotation, size));
+var sphere  = coreSystem.AddPrimitive(new SpherePrimitive(0, position, radius));
+var capsule = coreSystem.AddPrimitive(
+    new CapsulePrimitive(0, position, rotation, new UVector3(radius, height, radius)));
 
-// Perform raycast
+// Raycast
 var ray = new CRay(origin, direction, maxDistance);
-if (coreSystem.Raycast(ray, out CHitInfo hit))
+if (coreSystem.Raycast(ray, out CHitInfo hit, maxDistance))
 {
     Console.WriteLine($"Hit primitive {hit.PrimitiveID} at distance {hit.Distance}");
 }
+
+// Move / re-orient / resize later, by id
+coreSystem.UpdatePrimitive(box.ID, newPosition, newRotation, newSize);
 ```
 
 ## Performance Guidelines
@@ -200,16 +240,15 @@ if (coreSystem.Raycast(ray, out CHitInfo hit))
 - ✅ Dense object clusters
 - ✅ Short-range raycasts
 
-### Memory Usage
-- **SimpleList**: ~100 bytes per primitive
-- **QuadTree**: ~100 bytes per primitive + tree overhead (~500 bytes per node)
-- **Recommendation**: Profile your specific use case
+### Memory
+- Raycasts allocate **0 B** at steady state; `RaycastAll` allocates only the returned list
+- Scene storage: ~0.3–0.4 KB per primitive including QuadTree overhead (≈650 KB for 2,000 primitives)
 
 ## Requirements
 
 - Unity 2019.4 or later (for Unity layer)
-- .NET Standard 2.0 compatible
-- No external dependencies
+- .NET Standard 2.0 compatible core; no external dependencies
+- .NET 8 SDK (optional) — only for running the headless test suite (`Tests.Core/`)
 
 ## Use Cases
 
@@ -227,7 +266,7 @@ if (coreSystem.Raycast(ray, out CHitInfo hit))
 
 ## License
 
-This project is open source. Feel free to use and modify for your projects.
+MIT — see [LICENSE](LICENSE). Feel free to use and modify for your projects.
 
 ---
 

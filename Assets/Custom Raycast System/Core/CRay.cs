@@ -1,11 +1,8 @@
 ﻿#if UNITY_5_3_OR_NEWER
 using UVector3 = UnityEngine.Vector3;
 using UMathf = UnityEngine.Mathf;
-#else
-    // Assuming CustomMath.cs is in the same namespace or accessible
 #endif
 
-// Defines the custom Ray struct.
 public struct CRay
 {
     public UVector3 Origin;
@@ -15,7 +12,7 @@ public struct CRay
     public CRay(UVector3 origin, UVector3 direction, float maxDistance = UMathf.Infinity)
     {
         Origin = origin;
-        Direction = direction.normalized; // Ensure direction is normalized
+        Direction = direction.normalized;
         MaxDistance = maxDistance;
     }
 
